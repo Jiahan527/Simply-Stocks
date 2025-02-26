@@ -1,25 +1,64 @@
+import time
+import random
 from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from models import User, db
 import yfinance as yf
 import pandas as pd
 
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['CACHE_TYPE'] = 'SimpleCache'
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 
-DEFAULT_TICKERS = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN"]
 
 # initial
 db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+cache = Cache(app)
 
 # create database
 with app.app_context():
     db.create_all()
+
+
+@cache.memoize(timeout=300)
+def get_core_data():
+
+    core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
+
+    # 1 API request
+    data = yf.download(
+        tickers=core_tickers,
+        period="1d",
+        interval="1m",
+        group_by="ticker",
+        progress=False,
+        auto_adjust=False
+    )
+
+    # Data
+    processed_data = {}
+    for ticker in core_tickers:
+        try:
+            df = data[ticker]
+            latest = df.iloc[-1]
+            processed_data[ticker] = {
+                "price": round(latest["Close"], 2),
+                "change": round(latest["Close"] - df.iloc[0]["Open"], 2)
+            }
+            # delay
+            time.sleep(random.uniform(1, 2))
+        except KeyError:
+            processed_data[ticker] = {"error": "数据暂不可用"}
+    return processed_data
+
 
 def get_stock_data(tickers, period="1d", interval="1m"):
     data = {}
@@ -27,12 +66,17 @@ def get_stock_data(tickers, period="1d", interval="1m"):
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period=period, interval=interval)
+
             if not hist.empty:
-                latest_price = hist["Close"].iloc[-1]
+                # 计算价格变化
+                price_change = round(hist["Close"].iloc[-1] - hist["Open"].iloc[0], 2)
+                percent_change = round((price_change / hist["Open"].iloc[0]) * 100, 2)
+
                 data[ticker] = {
-                    "price": round(latest_price, 2),
+                    "price": round(hist["Close"].iloc[-1], 2),
+                    "change": percent_change,  # 添加变化百分比
                     "currency": stock.info.get("currency", "USD"),
-                    "name": stock.info.get("shortName", ticker),
+                    "name": stock.info.get("shortName", ticker)
                 }
             else:
                 data[ticker] = {"error": "No data available"}
@@ -45,12 +89,87 @@ def get_stock_data(tickers, period="1d", interval="1m"):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# get news
+@cache.memoize(timeout=1800)
 
-# index
+def get_news(tickers=["AAPL", "TSLA"], max_news=5):
+    news_list = [{
+                "title": "Market Update: Stocks Show Mixed Trends",
+                "link": "#",
+                "publisher": "SimplyStocks",
+                "timestamp": 0
+            }]
+    return news_list[:max_news]
+
+
+# def get_news(tickers=["AAPL", "TSLA"], max_news=5):
+#     news_list = []
+#     try:
+#         for ticker in tickers:
+#             stock = yf.Ticker(ticker)
+#             news = stock.news or []
+#
+#             for item in news[:max_news]:
+#                 # 添加更严格的字段验证
+#                 if not isinstance(item, dict):
+#                     continue
+#
+#                 # 增强默认值处理
+#                 safe_item = {
+#                     "title": item.get("title") or "Latest Market News",
+#                     "link": item.get("link") or "#",
+#                     "publisher": item.get("publisher") or "Financial News",
+#                     "timestamp": item.get("providerPublishTime") or 0
+#                 }
+#
+#                 # 添加链接有效性检查
+#                 if safe_item["link"] == "#" and safe_item["title"] == "Latest Market News":
+#                     continue  # 跳过无效条目
+#
+#                 if not any(n["link"] == safe_item["link"] for n in news_list):
+#                     news_list.append(safe_item)
+#
+#                 if len(news_list) >= max_news:
+#                     break
+#
+#         news_list.sort(key=lambda x: x["timestamp"], reverse=True)
+#
+#         # 保证至少返回示例新闻
+#         if not news_list:
+#             return [{
+#                 "title": "Market Update: Stocks Show Mixed Trends",
+#                 "link": "#",
+#                 "publisher": "SimplyStocks",
+#                 "timestamp": 0
+#             }]
+#
+#     except Exception as e:
+#         print(f"News Error: {str(e)}")
+#
+#     return news_list[:max_news]
+
+
 @app.route('/')
 def index():
-    stock_data = get_stock_data(DEFAULT_TICKERS)
-    return render_template("index.html", stock_data=stock_data)
+
+    core_data = get_core_data()
+
+    # divide news and data
+    stock_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN"]
+    index_tickers = {"^DJI": "DJI", "^IXIC": "IXIC", "^GSPC": "^GSPC"}
+
+    stock_data = {ticker: core_data.get(ticker) for ticker in stock_tickers}
+    market_indices = {name: core_data.get(ticker) for ticker, name in index_tickers.items()}
+
+    # dews
+    news = get_news()
+
+    return render_template(
+        "index.html",
+        stock_data=stock_data,
+        market_indices=market_indices,
+        news=news
+    )
 
 # search
 @app.route('/search', methods=['GET'])
@@ -59,8 +178,22 @@ def search_stock():
     if not ticker:
         return redirect(url_for('index'))
 
+    # 获取搜索股票数据
     stock_data = get_stock_data([ticker])
-    return render_template("index.html", stock_data=stock_data, searched_ticker=ticker)
+
+    # 获取其他必要数据（复用缓存）
+    core_data = get_core_data()
+    index_tickers = {"^DJI": "Dow Jones", "^IXIC": "NASDAQ", "^GSPC": "S&P 500"}
+    market_indices = {name: core_data.get(ticker) for ticker, name in index_tickers.items()}
+    news = get_news()
+
+    return render_template(
+        "index.html",
+        stock_data=stock_data,
+        market_indices=market_indices,
+        news=news,
+        searched_ticker=ticker
+    )
 
 
 # login
