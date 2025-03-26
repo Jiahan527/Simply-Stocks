@@ -1,10 +1,10 @@
 import time
 import random
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, abort
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import User, db
+from models import User, db, Portfolio
 import yfinance as yf
 import pandas as pd
 
@@ -60,6 +60,7 @@ def get_core_data():
     return processed_data
 
 
+@cache.memoize(timeout=60)
 def get_stock_data(tickers, period="1d", interval="1m"):
     data = {}
     for ticker in tickers:
@@ -157,16 +158,25 @@ def index():
     # divide news and data
     stock_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN"]
     index_tickers = {"^DJI": "DJI", "^IXIC": "IXIC", "^GSPC": "^GSPC"}
+    user_stock_data = {}
+    default_stock_data = {}
 
-    stock_data = {ticker: core_data.get(ticker) for ticker in stock_tickers}
     market_indices = {name: core_data.get(ticker) for ticker, name in index_tickers.items()}
 
-    # dews
+    if current_user.is_authenticated:
+        user_tickers = [entry.ticker for entry in current_user.portfolios]
+        user_stock_data = get_stock_data(user_tickers)
+        remaining_tickers = [ticker for ticker in stock_tickers if ticker not in user_tickers]
+        default_stock_data = get_stock_data(remaining_tickers)
+    else:
+        default_stock_data = get_stock_data(stock_tickers)
+
     news = get_news()
 
     return render_template(
         "index.html",
-        stock_data=stock_data,
+        user_stock_data=user_stock_data,
+        default_stock_data=default_stock_data,
         market_indices=market_indices,
         news=news
     )
@@ -246,6 +256,45 @@ def logout():
     logout_user()
     return redirect(url_for('index'))
 
+# index
+@app.route('/index')
+def back_from_dashboard_to_index():
+    return redirect(url_for('index'))
+
+
+@app.route('/add_to_portfolio', methods=['POST'])
+@login_required
+def add_to_portfolio():
+    ticker = request.form.get('ticker').upper().strip()
+
+    if not yf.Ticker(ticker).info:
+        flash(f"Valid Stock Code: {ticker}", "danger")
+        return redirect(url_for('dashboard'))
+
+    # 避免重复添加
+    existing = Portfolio.query.filter_by(user_id=current_user.id, ticker=ticker).first()
+    if existing:
+        flash(f"{ticker} Already in Your Portfolio List", "warning")
+        return redirect(url_for('dashboard'))
+
+    new_entry = Portfolio(user_id=current_user.id, ticker=ticker)
+    db.session.add(new_entry)
+    db.session.commit()
+    flash(f"{ticker} has been added in Your List", "success")
+    return redirect(url_for('dashboard'))
+
+
+# 移除投资组合项
+@app.route('/remove_from_portfolio/<int:portfolio_id>', methods=['POST'])
+@login_required
+def remove_from_portfolio(portfolio_id):
+    entry = Portfolio.query.get_or_404(portfolio_id)
+    if entry.user_id != current_user.id:
+        abort(403)
+    db.session.delete(entry)
+    db.session.commit()
+    flash("Stock has been moved", "success")
+    return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -87,10 +87,44 @@
                         </div>
                     </div>
                 {% else %}
+                    {% if current_user.is_authenticated and user_stock_data %}
+                        <div class="card mb-4">
+                            <div class="card-header bg-light">
+                                <h4 class="mb-0">📌 Your Tracked Stocks</h4>
+                            </div>
+                            <div class="card-body">
+                                <div class="row row-cols-1 row-cols-md-2 g-4">
+                                    {% for ticker, data in user_stock_data.items() %}
+                                        <div class="col">
+                                            <div class="card h-100">
+                                                <div class="card-body">
+                                                    <div class="d-flex justify-content-between">
+                                                        <div>
+                                                            <h5 class="card-title">{{ data.name }}</h5>
+                                                            <h6 class="text-muted">{{ ticker }}</h6>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            <div class="fs-4">
+                                                                {{ data.currency }} {{ data.price|round(2) }}
+                                                            </div>
+                                                            <small class="{{ 'text-success' if data.change > 0 else 'text-danger' }}">
+                                                                {{ data.change|abs }}%
+                                                                {{ '↑' if data.change > 0 else '↓' }}
+                                                            </small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
                     <!-- Default Market Overview -->
                     <h2 class="mb-3">Market Overview</h2>
                     <div class="row row-cols-1 row-cols-md-2 g-4">
-                        {% for ticker, data in stock_data.items() %}
+                        {% for ticker, data in default_stock_data.items() %}
                             <div class="col">
                                 <div class="card h-100">
                                     <div class="card-body">
