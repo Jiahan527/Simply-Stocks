@@ -6,6 +6,16 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
     <h1>Welcome, {{ user.username }}!</h1>
     <p>This is your dashboard.</p>
     <a href="{{ url_for('logout') }}">Logout</a>
@@ -13,6 +23,7 @@
 </body>
 <div class="container mt-4">
     <h2>Your Portfolios List</h2>
+
 
     <form method="POST" action="{{ url_for('add_to_portfolio') }}" class="mb-4">
         <div class="input-group">
