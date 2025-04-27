@@ -56,7 +56,7 @@ def get_core_data():
             # delay
             time.sleep(random.uniform(1, 2))
         except KeyError:
-            processed_data[ticker] = {"error": "数据暂不可用"}
+            processed_data[ticker] = {"error": "data error"}
     return processed_data
 
 
@@ -69,13 +69,12 @@ def get_stock_data(tickers, period="1d", interval="1m"):
             hist = stock.history(period=period, interval=interval)
 
             if not hist.empty:
-                # 计算价格变化
                 price_change = round(hist["Close"].iloc[-1] - hist["Open"].iloc[0], 2)
                 percent_change = round((price_change / hist["Open"].iloc[0]) * 100, 2)
 
                 data[ticker] = {
                     "price": round(hist["Close"].iloc[-1], 2),
-                    "change": percent_change,  # 添加变化百分比
+                    "change": percent_change,
                     "currency": stock.info.get("currency", "USD"),
                     "name": stock.info.get("shortName", ticker)
                 }
@@ -271,7 +270,6 @@ def add_to_portfolio():
         flash(f"Valid Stock Code: {ticker}", "danger")
         return redirect(url_for('dashboard'))
 
-    # 避免重复添加
     existing = Portfolio.query.filter_by(user_id=current_user.id, ticker=ticker).first()
     if existing:
         flash(f"{ticker} Already in Your Portfolio List", "warning")
@@ -284,7 +282,7 @@ def add_to_portfolio():
     return redirect(url_for('dashboard'))
 
 
-# 移除投资组合项
+
 @app.route('/remove_from_portfolio/<int:portfolio_id>', methods=['POST'])
 @login_required
 def remove_from_portfolio(portfolio_id):
