@@ -6,8 +6,50 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
     <h1>Welcome, {{ user.username }}!</h1>
     <p>This is your dashboard.</p>
     <a href="{{ url_for('logout') }}">Logout</a>
+    <a href="{{ url_for('index') }}">Index</a>
 </body>
+<div class="container mt-4">
+    <h2>Your Portfolios List</h2>
+
+
+    <form method="POST" action="{{ url_for('add_to_portfolio') }}" class="mb-4">
+        <div class="input-group">
+            <input type="text" name="ticker" class="form-control" placeholder="Stock code" required>
+            <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+    </form>
+
+    <div class="row">
+        {% for entry in current_user.portfolios %}
+        <div class="col-md-4 mb-3">
+            <div class="card">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title">{{ entry.ticker }}</h5>
+                        <small class="text-muted">Added Time: {{ entry.added_at.strftime('%Y-%m-%d') }}</small>
+                    </div>
+                    <form method="POST" action="{{ url_for('remove_from_portfolio', portfolio_id=entry.id) }}">
+                        <button type="submit" class="btn btn-danger btn-sm">Move</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-info">Empty Portfolio List, Please Add Stock First</div>
+        {% endfor %}
+    </div>
+</div>
 </html>
