@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stock Watchlist</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles2.css') }}">
+</head>
+<body>
+    <nav style="background-color: #1f1f1f; padding: 1rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <a href="{{ url_for('index') }}" style="color: #00d1b2; text-decoration: none; margin-right: 1.5rem; font-weight: bold;">Home</a>
+    
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('index') }}" style="color: #00d1b2; text-decoration: none; margin-right: 1.5rem; font-weight: bold;">Research</a>
+                <a href="{{ url_for('analysis') }}" style="color: #00d1b2; text-decoration: none; margin-right: 1.5rem; font-weight: bold;">Analysis</a>
+                <a href="{{ url_for('watchlist') }}" style="color: #00d1b2; text-decoration: none; margin-right: 1.5rem; font-weight: bold;">Watchlist</a>
+                <a href="{{ url_for('logout') }}" style="color: #00d1b2; text-decoration: none; font-weight: bold;">Logout</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" style="color: #00d1b2; text-decoration: none; margin-right: 1.5rem; font-weight: bold;">Login</a>
+                <a href="{{ url_for('register') }}" style="color: #00d1b2; text-decoration: none; font-weight: bold;">Register</a>
+            {% endif %}
+        </div>
+    </nav>
+    {% with messages = get_flashed_messages(with_categories=True) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('index') }}" method="POST">
+        <label for="ticker">Enter Ticker Symbol:</label>
+        <input type="text" name="ticker" id="ticker" required>
+        <input type="submit" value="Add Ticker">
+    </form>
+
+    {% if stocks %}
+    <table>
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Last</th>
+                <th>Date </th>
+                <th>Change</th>
+                <th>Change %</th>
+                <th>High</th>
+                <th>Low</th>
+                <th>Volume</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stock in stocks %}
+            <tr>
+                <td>{{ stock.ticker }}</td>
+                <td>${{ '%.2f' | format(stock.price) }}</td>
+                <td>{{ stock.date }}</td>
+                <td class="{{ 'green' if stock.change > 0 else 'red' if stock.change < 0 else '' }}">
+                    {{ '%.2f' | format(stock.change) }}
+                </td>
+                <td class="{{ 'green' if stock.change_percent > 0 else 'red' if stock.change_percent < 0 else '' }}">
+                    {{ '%.2f%%' | format(stock.change_percent) }}
+                </td>
+                <td>${{ '%.2f' | format(stock.high) }}</td>
+                <td>${{ '%.2f' | format(stock.low) }}</td>
+                <td>{{ stock.volume | int }}</td>
+                <td><a href="{{ url_for('remove', ticker=stock.ticker) }}">Remove</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No tickers in list.</p>
+    {% endif %}
+</body>
+</html>
