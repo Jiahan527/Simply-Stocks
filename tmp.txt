@@ -1,0 +1,15 @@
+# Create a custom Jinja2 filter to format big numbers
+@app.template_filter('format_large_number')
+def format_large_number(value):
+    try:
+        value = float(value)
+        if abs(value) >= 1_000_000_000:
+            return "${:,.2f}B".format(value / 1_000_000_000)
+        elif abs(value) >= 1_000_000:
+            return "${:,.2f}M".format(value / 1_000_000)
+        elif abs(value) >= 1_000:
+            return "${:,.2f}K".format(value / 1_000)
+        else:
+            return "${:,.2f}".format(value)
+    except (ValueError, TypeError):
+        return value
