@@ -1,6 +1,6 @@
 import time
 import random
-from flask import Flask, render_template, request, redirect, url_for, flash, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -10,6 +10,22 @@ import pandas as pd
 
 
 app = Flask(__name__)
+# Create a custom Jinja2 filter to format big numbers
+@app.template_filter('format_large_number')
+def format_large_number(value):
+    try:
+        value = float(value)
+        if abs(value) >= 1_000_000_000:
+            return "${:,.2f}B".format(value / 1_000_000_000)
+        elif abs(value) >= 1_000_000:
+            return "${:,.2f}M".format(value / 1_000_000)
+        elif abs(value) >= 1_000:
+            return "${:,.2f}K".format(value / 1_000)
+        else:
+            return "${:,.2f}".format(value)
+    except (ValueError, TypeError):
+        return value
+    
 app.config['SECRET_KEY'] = 'your-secret-key'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -261,6 +277,55 @@ def logout():
 def back_from_dashboard_to_index():
     return redirect(url_for('index'))
 
+@app.route('/company', methods=['POST'])
+def get_company_info():
+    ticker = request.form.get('ticker', '').upper().strip()
+    if not ticker:
+        return "Error: No ticker provided", 400
+
+    company = yf.Ticker(ticker)
+
+    income_stmt = company.income_stmt.fillna("").to_dict()
+    balance_sheet = company.balance_sheet.fillna("").to_dict()
+    cashflow_stmt = company.cashflow.fillna("").to_dict()
+    tenk_data = company.financials.fillna("").to_dict()
+
+    return render_template(
+        "financials.html",
+        ticker=ticker,
+        income_statement=income_stmt,
+        balance_sheet=balance_sheet,
+        cashflow_statement=cashflow_stmt,
+        tenk_data=tenk_data
+    )
+
+
+@app.route('/api/stock-price/<ticker>')
+def get_stock_price(ticker):
+    range_option = request.args.get("range", "1d")  # default to 1 day
+    interval_map = {
+        "1d": "1m",
+        "6mo": "1d",
+        "1y": "1d",
+        "2y": "1d"
+    }
+
+    interval = interval_map.get(range_option, "1d")
+
+    try:
+        stock = yf.Ticker(ticker.upper())
+        hist = stock.history(period=range_option, interval=interval)
+
+        data = {
+            "times": hist.index.strftime("%Y-%m-%d" if interval != "1m" else "%H:%M").tolist(),
+            "prices": hist["Close"].fillna("").tolist()
+        }
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
 
 @app.route('/add_to_portfolio', methods=['POST'])
 @login_required
@@ -295,6 +360,78 @@ def remove_from_portfolio(portfolio_id):
     db.session.commit()
     flash("Stock has been moved", "success")
     return redirect(url_for('dashboard'))
+
+@app.route('/analysis', methods=['GET', 'POST'])
+def analysis():
+    if request.method == 'POST':
+        ticker = request.form.get('ticker', '').upper().strip()
+        if not ticker:
+            return "Ticker required", 400
+
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Basic info
+        name = info.get("longName", ticker)
+        price = info.get("currentPrice")
+        change = info.get("regularMarketChangePercent")
+
+        # Valuation metrics
+        pe = info.get("trailingPE")
+        eps = info.get("trailingEps")
+        dividend = info.get("dividendRate")
+
+        growth_rate = info.get("earningsGrowth")  # e.g., 0.12 = 12%
+        
+        if growth_rate is None or growth_rate <= 0:
+            growth_rate = 0.05
+        
+        lynch_value = None
+        if eps and eps > 0:
+            lynch_value = round(eps * growth_rate * 22.5, 2)
+
+        # DDM Calculation (with fixed assumptions)
+        growth = 0.05
+        discount = 0.08
+        ddm_value = None
+        if dividend and discount > growth:
+            ddm_value = round(dividend / (discount - growth), 2)
+        
+        #discount cash flow value
+        fcf = info.get("freeCashflow")
+        discount_rate = 0.08
+        growth_rate = 0.05
+        years = 5
+        dcf_value = None
+        
+        if fcf and fcf > 0:
+            fcfs = []
+            for year in range(1, years + 1):
+                fcf_year = fcf * ((1 + growth_rate) ** year)
+                discounted = fcf_year / ((1 + discount_rate) ** year)
+                fcfs.append(discounted)
+
+            terminal_value = (fcfs[-1] * (1 + growth_rate)) / (discount_rate - growth_rate)
+            discounted_tv = terminal_value / ((1 + discount_rate) ** years)
+
+            dcf_value = round(sum(fcfs) + discounted_tv, 2)
+
+        return render_template(
+            'analysis.html',
+            ticker=ticker,
+            name=name,
+            price=price,
+            change=change,
+            pe=pe,
+            eps=eps,
+            growth_rate=growth_rate,
+            dividend=dividend,
+            lynch_value=lynch_value,
+            ddm_value=ddm_value,
+            dcf_value=dcf_value
+        )
+
+    return render_template('analysis.html')
 
 if __name__ == '__main__':
     app.run(debug=True)

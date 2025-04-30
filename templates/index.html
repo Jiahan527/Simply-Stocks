@@ -82,6 +82,11 @@
                                             {% endif %}
                                         </div>
                                     </div>
+                                    <form action="/company" method="post">
+                                        <input type="hidden" name="ticker" value="{{ searched_ticker }}">
+                                        <button type="submit">View company info</button>
+                                    </form>
+                                    
                                 </div>
                             {% endif %}
                         </div>
