@@ -3,15 +3,17 @@ import time
 import os
 import random
 import re
-from flask import Flask, render_template, request, redirect, url_for, flash, abort
+import yfinance as yf
+
+from flask import Flask, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import User, db, Portfolio
-import yfinance as yf
-import pandas as pd
-from dotenv import load_dotenv
 from flask_talisman import Talisman
+from dotenv import load_dotenv
+
+from models import User, db, Portfolio
+from utils import load_watchlist, fetch_stockdata, save_watchlist
 
 
 cache = Cache()
@@ -33,10 +35,12 @@ def create_app():
     cache.init_app(app)
     Talisman(app, content_security_policy={
         'default-src': "'self'",
-        'script-src': ["'self'", "https://cdn.jsdelivr.net"],
-        'style-src': ["'self'", "https://cdn.jsdelivr.net", "'unsafe-inline'"],
-        'font-src': ["'self'", "https://cdn.jsdelivr.net"],
-        'img-src': ["'self'", "data:", "https://*.yahoo.com"]
+
+        'script-src': ["'self'", "https://cdn.jsdelivr.net","https://cdn.plot.ly","'unsafe-inline'","'unsafe-eval'"],
+        'style-src': ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com","'unsafe-inline'"],
+        'font-src': ["'self'", "https://cdn.jsdelivr.net","https://fonts.gstatic.com"],
+        'img-src': ["'self'", "data:", "https://*.yahoo.com"],
+        'connect-src': ["'self'","https://*.yahoo.com"]
     })
 
     with app.app_context():
@@ -48,6 +52,26 @@ def create_app():
 
 def is_valid_ticker(ticker):
     return re.match(r'^[A-Z0-9]{1,10}$', ticker) is not None
+
+
+def register_routes(app):
+    @app.template_filter('format_large_number')
+    def format_large_number(value):
+        try:
+            value = float(value)
+            if abs(value) >= 1_000_000_000:
+                return "${:,.2f}B".format(value / 1_000_000_000)
+            elif abs(value) >= 1_000_000:
+                return "${:,.2f}M".format(value / 1_000_000)
+            elif abs(value) >= 1_000:
+                return "${:,.2f}K".format(value / 1_000)
+            else:
+                return "${:,.2f}".format(value)
+        except (ValueError, TypeError):
+            return value
+    @cache.memoize(timeout=300)
+    def get_core_data():
+        core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
 
 def register_routes(app):
     @cache.memoize(timeout=300)
@@ -65,7 +89,6 @@ def register_routes(app):
             auto_adjust=False
         )
 
-        # Data
         processed_data = {}
         for ticker in core_tickers:
             try:
@@ -75,12 +98,11 @@ def register_routes(app):
                     "price": round(latest["Close"], 2),
                     "change": round(latest["Close"] - df.iloc[0]["Open"], 2)
                 }
-                # delay
+
                 time.sleep(random.uniform(1, 2))
             except KeyError:
                 processed_data[ticker] = {"error": "data error"}
         return processed_data
-
 
     @cache.memoize(timeout=60)
     def get_stock_data(tickers, period="1d", interval="1m"):
@@ -89,11 +111,9 @@ def register_routes(app):
             try:
                 stock = yf.Ticker(ticker)
                 hist = stock.history(period=period, interval=interval)
-
                 if not hist.empty:
                     price_change = round(hist["Close"].iloc[-1] - hist["Open"].iloc[0], 2)
                     percent_change = round((price_change / hist["Open"].iloc[0]) * 100, 2)
-
                     data[ticker] = {
                         "price": round(hist["Close"].iloc[-1], 2),
                         "change": percent_change,
@@ -106,7 +126,7 @@ def register_routes(app):
                 data[ticker] = {"error": str(e)}
         return data
 
-    # load user
+
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.get(int(user_id))
@@ -169,7 +189,6 @@ def register_routes(app):
     #         print(f"News Error: {str(e)}")
     #
     #     return news_list[:max_news]
-
 
     @app.route('/')
     def index():
@@ -235,7 +254,7 @@ def register_routes(app):
             logging.error(f"Search error: {str(e)}", exc_info=True)
             flash("An error occurred during the search. Please try again.")
             return redirect(url_for('index'))
-
+          
     # login
     @app.route('/login', methods=['GET', 'POST'])
     def login():
@@ -248,6 +267,7 @@ def register_routes(app):
                 return redirect(url_for('dashboard'))
             flash('Invalid username or password')
         return render_template('login.html')
+
 
 
     # register
@@ -279,6 +299,7 @@ def register_routes(app):
         return render_template('dashboard.html', user=current_user)
 
 
+      
     # logout
     @app.route('/logout')
     @login_required
@@ -286,11 +307,10 @@ def register_routes(app):
         logout_user()
         return redirect(url_for('index'))
 
-    # index
+
     @app.route('/index')
     def back_from_dashboard_to_index():
         return redirect(url_for('index'))
-
 
     @app.route('/add_to_portfolio', methods=['POST'])
     @login_required
@@ -312,7 +332,40 @@ def register_routes(app):
         flash(f"{ticker} has been added in Your List", "success")
         return redirect(url_for('dashboard'))
 
+    @app.route('/company', methods=['POST'])
+    def get_company_info():
+        ticker = request.form.get('ticker', '').upper().strip()
+        if not ticker:
+            return "Error: No ticker provided", 400
 
+        company = yf.Ticker(ticker)
+        try:
+            income_stmt = company.income_stmt.fillna(0).astype(float).T.to_dict(orient='split')
+            balance_sheet = company.balance_sheet.fillna(0).astype(float).T.to_dict(orient='split')
+            cashflow_stmt = company.cashflow.fillna(0).astype(float).T.to_dict(orient='split')
+            tenk_data = company.financials.fillna(0).astype(float).T.to_dict(orient='split')
+        except Exception as e:
+            print("Error fetching data:", str(e))
+            flash("Failed to fetch financial data.", "error")
+            return redirect(url_for('index'))
+        return render_template("financials.html", ticker=ticker, income_statement=income_stmt, balance_sheet=balance_sheet, cashflow_statement=cashflow_stmt, tenk_data=tenk_data)
+
+    @app.route('/api/stock-price/<ticker>')
+    def get_stock_price(ticker):
+        range_option = request.args.get("range", "1d")
+        interval_map = {"1d": "1m", "6mo": "1d", "1y": "1d", "2y": "1d"}
+        interval = interval_map.get(range_option, "1d")
+
+        try:
+            stock = yf.Ticker(ticker.upper())
+            hist = stock.history(period=range_option, interval=interval)
+            data = {
+                "times": hist.index.strftime("%Y-%m-%d" if interval != "1m" else "%H:%M").tolist(),
+                "prices": hist["Close"].fillna("").tolist()
+            }
+            return jsonify(data)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route('/remove_from_portfolio/<int:portfolio_id>', methods=['POST'])
     @login_required
@@ -325,6 +378,86 @@ def register_routes(app):
         flash("Stock has been moved", "success")
         return redirect(url_for('dashboard'))
 
+    @app.route('/analysis', methods=['GET', 'POST'])
+    def analysis():
+        if request.method == 'POST':
+            ticker = request.form.get('ticker', '').upper().strip()
+            if not ticker:
+                return "Ticker required", 400
+
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            name = info.get("longName", ticker)
+            price = info.get("currentPrice")
+            change = info.get("regularMarketChangePercent")
+            pe = info.get("trailingPE")
+            eps = info.get("trailingEps")
+            dividend = info.get("dividendRate")
+            growth_rate = info.get("earningsGrowth") or 0.05
+
+            lynch_value = round(eps * growth_rate * 22.5, 2) if eps and eps > 0 else None
+            ddm_value = round(dividend / (0.08 - 0.05), 2) if dividend else None
+
+            dcf_value = None
+            fcf = info.get("freeCashflow")
+            if fcf and fcf > 0:
+                discount_rate = 0.08
+                growth_rate = 0.05
+                years = 5
+                fcfs = [fcf * ((1 + growth_rate) ** year) / ((1 + discount_rate) ** year) for year in range(1, years + 1)]
+                terminal_value = (fcfs[-1] * (1 + growth_rate)) / (discount_rate - growth_rate)
+                discounted_tv = terminal_value / ((1 + discount_rate) ** years)
+                dcf_value = round(sum(fcfs) + discounted_tv, 2)
+
+            return render_template(
+                'analysis.html', ticker=ticker, name=name, price=price, change=change,
+                pe=pe, eps=eps, growth_rate=growth_rate, dividend=dividend,
+                lynch_value=lynch_value, ddm_value=ddm_value, dcf_value=dcf_value
+            )
+
+        return render_template('analysis.html')
+
+    @app.route('/watchlist', methods=['GET', 'POST'])
+    def watchlist():
+        tickers = load_watchlist()
+
+        if request.method == 'POST':
+            ticker = request.form.get('ticker', '').upper().strip()
+            if not ticker:
+                flash('Please enter a ticker symbol', 'error')
+            else:
+                data = fetch_stockdata(ticker)
+                if data:
+                    if ticker not in tickers:
+                        tickers.append(ticker)
+                        save_watchlist(tickers)
+                        flash(f'{ticker} added.', 'success')
+                    else:
+                        flash(f'{ticker} already in list.', 'info')
+                else:
+                    flash(f'Problem fetching data for {ticker}.', 'error')
+            return redirect(url_for('watchlist'))
+
+        stocks_data = []
+        for ticker in tickers:
+            data = fetch_stockdata(ticker)
+            if data:
+                stocks_data.append(data)
+
+        return render_template('watchlist.html', stocks=stocks_data)
+
+    @app.route('/remove/<ticker>')
+    def remove(ticker):
+        tickers = load_watchlist()
+        if ticker in tickers:
+            tickers.remove(ticker)
+            save_watchlist(tickers)
+            flash(f'{ticker} removed.', 'success')
+        else:
+            flash(f'{ticker} not found in the list.', 'error')
+        return redirect(url_for('watchlist'))
+
+      
 if __name__ == '__main__':
     app = create_app()
     app.run(debug=True)
