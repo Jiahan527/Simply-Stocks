@@ -146,7 +146,7 @@
     </div>
 
     <!-- Add this to your <head> -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.18.2.min.js"></script>
     <!-- Inside your <body>, where you want the graph -->
     <h2>Live Stock Graph for {{ ticker }}</h2>
     <form method="POST" action="/analysis">
@@ -154,7 +154,7 @@
         <button type="submit">Analyze</button>
     </form>
     <div id="stock-graph" style="width: 100%; height: 400px; max-width: 900px; overflow-x: auto;"></div>
-    
+
     <script>
         const ticker = "{{ ticker }}";
         let selectedRange = "1d";
@@ -206,46 +206,46 @@
     </script>
 
 
-
-
-    {% macro render_table(title, data) %}
-    <div class="section">
-        <div class="dropdown-header" onclick="toggleSection(this)">
-            {{ title }}
-        </div>
-        <div class="dropdown-content">
-            {% if data %}
-            <div style="overflow-x: auto;">
-                <table>
+{% macro render_table(title, data) %}
+<div class="section">
+    <div class="dropdown-header" onclick="toggleSection(this)">
+        {{ title }}
+    </div>
+    <div class="dropdown-content">
+        {% if data and data.columns %}
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
                     <tr>
                         <th>Metric</th>
-                        {% set first_item = data.values() | list | first %}
-                        {% for date in first_item.keys() %}
-                        <th>{{ date }}</th>
+                        {% for column in data.columns %}
+                        <th>{{ column }}</th>
                         {% endfor %}
                     </tr>
-                    {% for metric, values in data.items() %}
+                </thead>
+                <tbody>
+                    {% for row in data.data %}
                     <tr>
-                        <td>{{ metric }}</td>
-                        {% for value in values.values() %}
-                        <td>
-                            {% if value is number %}
-                            {{ value | format_large_number }}
-                            {% else %}
-                            {{ value }}
-                            {% endif %}
-                        </td>
+                        <td>{{ data.index[loop.index0] }}</td>
+                        {% for value in row %}
+                            <td>
+                                {{ value | format_large_number }}
+                            </td>
                         {% endfor %}
                     </tr>
                     {% endfor %}
-                </table>
-            </div>
-            {% else %}
-            <p>No data available.</p>
-            {% endif %}
+                </tbody>
+            </table>
         </div>
+        {% else %}
+        <p>No data available.</p>
+        {% endif %}
     </div>
-    {% endmacro %}
+</div>
+{% endmacro %}
+
+
+
 
 
 

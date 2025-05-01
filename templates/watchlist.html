@@ -28,7 +28,7 @@
         {% endif %}
     {% endwith %}
 
-    <form action="{{ url_for('index') }}" method="POST">
+    <form action="{{ url_for('watchlist') }}" method="POST">
         <label for="ticker">Enter Ticker Symbol:</label>
         <input type="text" name="ticker" id="ticker" required>
         <input type="submit" value="Add Ticker">
