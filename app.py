@@ -72,14 +72,6 @@ def register_routes(app):
     @cache.memoize(timeout=300)
     def get_core_data():
         core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
-
-def register_routes(app):
-    @cache.memoize(timeout=300)
-    def get_core_data():
-
-        core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
-
-        # 1 API request
         data = yf.download(
             tickers=core_tickers,
             period="1d",
