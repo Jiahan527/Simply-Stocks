@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from models import User, db, Portfolio
 from utils import load_watchlist, fetch_stockdata, save_watchlist
 
+
 cache = Cache()
 login_manager = LoginManager()
 
@@ -34,6 +35,7 @@ def create_app():
     cache.init_app(app)
     Talisman(app, content_security_policy={
         'default-src': "'self'",
+
         'script-src': ["'self'", "https://cdn.jsdelivr.net","https://cdn.plot.ly","'unsafe-inline'","'unsafe-eval'"],
         'style-src': ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com","'unsafe-inline'"],
         'font-src': ["'self'", "https://cdn.jsdelivr.net","https://fonts.gstatic.com"],
@@ -70,6 +72,14 @@ def register_routes(app):
     @cache.memoize(timeout=300)
     def get_core_data():
         core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
+
+def register_routes(app):
+    @cache.memoize(timeout=300)
+    def get_core_data():
+
+        core_tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "^DJI", "^IXIC", "^GSPC"]
+
+        # 1 API request
         data = yf.download(
             tickers=core_tickers,
             period="1d",
@@ -88,6 +98,7 @@ def register_routes(app):
                     "price": round(latest["Close"], 2),
                     "change": round(latest["Close"] - df.iloc[0]["Open"], 2)
                 }
+
                 time.sleep(random.uniform(1, 2))
             except KeyError:
                 processed_data[ticker] = {"error": "data error"}
@@ -115,18 +126,69 @@ def register_routes(app):
                 data[ticker] = {"error": str(e)}
         return data
 
+
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.get(int(user_id))
 
+    # get news
     @cache.memoize(timeout=1800)
+
     def get_news(tickers=["AAPL", "TSLA"], max_news=5):
-        return [{
-            "title": "Market Update: Stocks Show Mixed Trends",
-            "link": "#",
-            "publisher": "SimplyStocks",
-            "timestamp": 0
-        }][:max_news]
+        news_list = [{
+                    "title": "Market Update: Stocks Show Mixed Trends",
+                    "link": "#",
+                    "publisher": "SimplyStocks",
+                    "timestamp": 0
+                }]
+        return news_list[:max_news]
+
+
+    # def get_news(tickers=["AAPL", "TSLA"], max_news=5):
+    #     news_list = []
+    #     try:
+    #         for ticker in tickers:
+    #             stock = yf.Ticker(ticker)
+    #             news = stock.news or []
+    #
+    #             for item in news[:max_news]:
+    #                 # 添加更严格的字段验证
+    #                 if not isinstance(item, dict):
+    #                     continue
+    #
+    #                 # 增强默认值处理
+    #                 safe_item = {
+    #                     "title": item.get("title") or "Latest Market News",
+    #                     "link": item.get("link") or "#",
+    #                     "publisher": item.get("publisher") or "Financial News",
+    #                     "timestamp": item.get("providerPublishTime") or 0
+    #                 }
+    #
+    #                 # 添加链接有效性检查
+    #                 if safe_item["link"] == "#" and safe_item["title"] == "Latest Market News":
+    #                     continue  # 跳过无效条目
+    #
+    #                 if not any(n["link"] == safe_item["link"] for n in news_list):
+    #                     news_list.append(safe_item)
+    #
+    #                 if len(news_list) >= max_news:
+    #                     break
+    #
+    #         news_list.sort(key=lambda x: x["timestamp"], reverse=True)
+    #
+    #         # 保证至少返回示例新闻
+    #         if not news_list:
+    #             return [{
+    #                 "title": "Market Update: Stocks Show Mixed Trends",
+    #                 "link": "#",
+    #                 "publisher": "SimplyStocks",
+    #                 "timestamp": 0
+    #             }]
+    #
+    #     except Exception as e:
+    #         print(f"News Error: {str(e)}")
+    #
+    #     return news_list[:max_news]
 
     @app.route('/')
     def index():
@@ -159,6 +221,7 @@ def register_routes(app):
             news=news
         )
 
+    # search
     @app.route('/search', methods=['GET'])
     def search_stock():
         try:
@@ -173,6 +236,7 @@ def register_routes(app):
                 return redirect(url_for('index'))
 
             stock_data = get_stock_data([raw_ticker])
+
 
             core_data = get_core_data()
             index_tickers = {"^DJI": "Dow Jones", "^IXIC": "NASDAQ", "^GSPC": "S&P 500"}
@@ -190,6 +254,8 @@ def register_routes(app):
             logging.error(f"Search error: {str(e)}", exc_info=True)
             flash("An error occurred during the search. Please try again.")
             return redirect(url_for('index'))
+          
+    # login
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         if request.method == 'POST':
@@ -202,6 +268,9 @@ def register_routes(app):
             flash('Invalid username or password')
         return render_template('login.html')
 
+
+
+    # register
     @app.route('/register', methods=['GET', 'POST'])
     def register():
         if request.method == 'POST':
@@ -222,16 +291,22 @@ def register_routes(app):
             return redirect(url_for('login'))
         return render_template('register.html')
 
+
+    # Dashboard
     @app.route('/dashboard')
     @login_required
     def dashboard():
         return render_template('dashboard.html', user=current_user)
 
+
+      
+    # logout
     @app.route('/logout')
     @login_required
     def logout():
         logout_user()
         return redirect(url_for('index'))
+
 
     @app.route('/index')
     def back_from_dashboard_to_index():
@@ -382,8 +457,7 @@ def register_routes(app):
             flash(f'{ticker} not found in the list.', 'error')
         return redirect(url_for('watchlist'))
 
-
-
+      
 if __name__ == '__main__':
     app = create_app()
     app.run(debug=True)

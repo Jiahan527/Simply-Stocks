@@ -4,6 +4,7 @@ from utils import load_watchlist, save_watchlist, fetch_stockdata
 app = Flask(__name__)
 app.secret_key = 'ABCDEFG'
 
+
 @app.route('/watchlist', methods=['GET', 'POST'])
 def index():
     tickers = load_watchlist()
@@ -30,6 +31,7 @@ def index():
         data = fetch_stockdata(ticker)
         if data:
             stocks_data.append(data)
+
 
     return render_template('index.html', stocks=stocks_data)
 
